@@ -1,6 +1,7 @@
 package com.lanracing.Game;
 
 import com.lanracing.Utility.InputState;
+import com.lanracing.Utility.Constants;
 import com.lanracing.Utility.Vector2D;
 
 import java.awt.Color;
@@ -8,9 +9,7 @@ import java.awt.Graphics2D;
 
 public class Car {
     public enum VehicleType {
-        SPEEDSTER(340, 180, 220, Color.CYAN),
-        MUSCLE(285, 240, 200, Color.RED),
-        BALANCED(310, 210, 210, Color.GREEN);
+        STANDARD(310, 210, 210, Color.GREEN);
 
         final double maxSpeed;
         final double acceleration;
@@ -60,10 +59,10 @@ public class Car {
         if (input.brake) {
             forward -= vehicleType.acceleration * 0.7;
         }
-        if (input.nitro && nitroMeter > 0) {
+        if (Constants.ENABLE_OPTIONAL_FEATURES && input.nitro && nitroMeter > 0) {
             forward += vehicleType.acceleration * 0.8;
             nitroMeter = Math.max(0, nitroMeter - (35 * dt));
-        } else {
+        } else if (Constants.ENABLE_OPTIONAL_FEATURES) {
             nitroMeter = Math.min(100, nitroMeter + (12 * dt));
         }
 

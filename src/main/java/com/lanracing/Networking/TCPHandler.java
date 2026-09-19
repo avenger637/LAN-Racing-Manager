@@ -32,7 +32,7 @@ public class TCPHandler implements Runnable {
             clientOutputs.put(playerId, out);
 
             String joinName = "Player-" + playerId.substring(0, 4);
-            game.addPlayer(new Player(playerId, joinName), Car.VehicleType.BALANCED);
+            game.addPlayer(new Player(playerId, joinName), Car.VehicleType.STANDARD);
 
             out.println("WELCOME|playerId=" + playerId + "|name=" + joinName);
             sendLobbySnapshot(out);

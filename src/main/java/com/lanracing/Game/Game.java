@@ -21,10 +21,12 @@ public class Game {
     private volatile long raceStartMillis;
 
     public Game() {
-        powerUps.add(new PowerUp(PowerUp.Type.NITRO, new Vector2D(520, 165)));
-        powerUps.add(new PowerUp(PowerUp.Type.SHIELD, new Vector2D(875, 330)));
-        powerUps.add(new PowerUp(PowerUp.Type.REPAIR, new Vector2D(520, 510)));
-        powerUps.add(new PowerUp(PowerUp.Type.TELEPORT, new Vector2D(200, 330)));
+        if (Constants.ENABLE_OPTIONAL_FEATURES) {
+            powerUps.add(new PowerUp(PowerUp.Type.NITRO, new Vector2D(520, 165)));
+            powerUps.add(new PowerUp(PowerUp.Type.SHIELD, new Vector2D(875, 330)));
+            powerUps.add(new PowerUp(PowerUp.Type.REPAIR, new Vector2D(520, 510)));
+            powerUps.add(new PowerUp(PowerUp.Type.TELEPORT, new Vector2D(200, 330)));
+        }
     }
 
     public void addPlayer(Player player, Car.VehicleType vehicleType) {

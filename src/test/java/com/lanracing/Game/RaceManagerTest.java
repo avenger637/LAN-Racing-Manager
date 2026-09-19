@@ -12,7 +12,7 @@ class RaceManagerTest {
     void shouldValidateCheckpointsBeforeLaps() {
         Track track = Track.defaultTrack();
         RaceManager manager = new RaceManager(1);
-        Car car = new Car("p1", Car.VehicleType.BALANCED, track.defaultSpawn(), 0);
+        Car car = new Car("p1", Car.VehicleType.STANDARD, track.defaultSpawn(), 0);
 
         manager.registerPlayer("p1");
 

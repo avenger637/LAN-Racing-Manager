@@ -226,7 +226,7 @@ public class GameClient {
         if (playerId == null || game.getGameState().getPlayersById().containsKey(playerId)) {
             return;
         }
-        game.addPlayer(new com.lanracing.Utility.Player(playerId, name), Car.VehicleType.BALANCED);
+        game.addPlayer(new com.lanracing.Utility.Player(playerId, name), Car.VehicleType.STANDARD);
     }
 
     public void disconnect() {

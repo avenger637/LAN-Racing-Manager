@@ -93,7 +93,7 @@ public class MainMenu extends JFrame {
 
     private void startOffline() {
         String localId = "local-player";
-        game.addPlayer(new Player(localId, "Player 1"), Car.VehicleType.BALANCED);
+        game.addPlayer(new Player(localId, "Player 1"), Car.VehicleType.STANDARD);
         showLobby(localId, true);
     }
 
