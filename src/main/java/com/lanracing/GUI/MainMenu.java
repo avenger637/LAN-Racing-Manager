@@ -67,7 +67,7 @@ public class MainMenu extends JFrame {
             serverThread.setDaemon(true);
             serverThread.start();
 
-            joinGameByHost("127.0.0.1");
+            joinGameByHost("127.0.0.1", true);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "Failed to host game: " + ex.getMessage());
         }
@@ -78,14 +78,14 @@ public class MainMenu extends JFrame {
         if (host == null || host.isBlank()) {
             return;
         }
-        joinGameByHost(host.trim());
+        joinGameByHost(host.trim(), false);
     }
 
-    private void joinGameByHost(String host) {
+    private void joinGameByHost(String host, boolean hostControls) {
         try {
             client = new GameClient(host, game);
             client.connect();
-            SwingUtilities.invokeLater(() -> showLobby("pending"));
+            SwingUtilities.invokeLater(() -> showLobby(null, hostControls));
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "Failed to join game: " + ex.getMessage());
         }
@@ -94,15 +94,22 @@ public class MainMenu extends JFrame {
     private void startOffline() {
         String localId = "local-player";
         game.addPlayer(new Player(localId, "Player 1"), Car.VehicleType.BALANCED);
-        showLobby(localId);
+        showLobby(localId, true);
     }
 
-    private void showLobby(String localPlayerId) {
-        LobbyScreen lobby = new LobbyScreen(game, localPlayerId, () -> showGame(localPlayerId));
+    private void showLobby(String localPlayerId, boolean hostControls) {
+        LobbyScreen lobby = new LobbyScreen(game, client, localPlayerId, hostControls, () -> showGame(resolveLocalPlayerId(localPlayerId)));
         root.add(lobby, "lobby");
         cardLayout.show(root, "lobby");
         revalidate();
         repaint();
+    }
+
+    private String resolveLocalPlayerId(String fallback) {
+        if (client != null && client.getLocalPlayerId() != null) {
+            return client.getLocalPlayerId();
+        }
+        return fallback;
     }
 
     private void showGame(String localPlayerId) {

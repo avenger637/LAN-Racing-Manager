@@ -17,6 +17,8 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class GameClient {
     private final String host;
@@ -30,7 +32,8 @@ public class GameClient {
 
     private volatile String localPlayerId;
     private volatile int inputSequence;
-    private final Deque<PredictedState> predictionBuffer = new ArrayDeque<>();
+    private final Deque<PendingInput> predictionBuffer = new ArrayDeque<>();
+    private final Map<String, RemoteState> remoteTargets = new ConcurrentHashMap<>();
 
     public GameClient(String host, Game game) {
         this.host = host;
@@ -54,7 +57,11 @@ public class GameClient {
     }
 
     public void sendReady() {
-        tcpOut.println("READY");
+        sendReady(true);
+    }
+
+    public void sendReady(boolean ready) {
+        tcpOut.println("READY|value=" + ready);
     }
 
     public void sendStartRace() {
@@ -71,19 +78,32 @@ public class GameClient {
         }
 
         inputSequence++;
-        game.getInputState(localPlayerId).accelerate = inputState.accelerate;
-        game.getInputState(localPlayerId).brake = inputState.brake;
-        game.getInputState(localPlayerId).turnLeft = inputState.turnLeft;
-        game.getInputState(localPlayerId).turnRight = inputState.turnRight;
-        game.getInputState(localPlayerId).nitro = inputState.nitro;
+        InputState localInput = game.getInputState(localPlayerId);
+        if (localInput == null) {
+            return;
+        }
+        localInput.accelerate = inputState.accelerate;
+        localInput.brake = inputState.brake;
+        localInput.turnLeft = inputState.turnLeft;
+        localInput.turnRight = inputState.turnRight;
+        localInput.nitro = inputState.nitro;
+        localInput.reset = inputState.reset;
 
         car.applyInput(inputState, 1.0 / Constants.CLIENT_UDP_SEND_RATE);
-        predictionBuffer.addLast(new PredictedState(inputSequence, car.getPosition(), car.getDirectionDeg()));
+        predictionBuffer.addLast(new PendingInput(inputSequence, copyInput(inputState)));
         if (predictionBuffer.size() > 50) {
             predictionBuffer.removeFirst();
         }
 
-        String packet = "MOVE|" + localPlayerId + "|" + car.getPosition().x + "|" + car.getPosition().y + "|" + car.getDirectionDeg() + "|" + inputSequence;
+        String packet = "INPUT|"
+                + localPlayerId + "|"
+                + inputState.accelerate + "|"
+                + inputState.brake + "|"
+                + inputState.turnLeft + "|"
+                + inputState.turnRight + "|"
+                + inputState.nitro + "|"
+                + inputState.reset + "|"
+                + inputSequence;
         byte[] data = packet.getBytes(StandardCharsets.UTF_8);
         try {
             udpSocket.send(new DatagramPacket(data, data.length, InetAddress.getByName(host), Constants.UDP_PORT));
@@ -98,7 +118,28 @@ public class GameClient {
                 MessageHandler.ParsedMessage msg = MessageHandler.parse(line);
                 if ("WELCOME".equals(msg.getType())) {
                     localPlayerId = msg.getPayload().get("playerId");
-                    game.addPlayer(new com.lanracing.Utility.Player(localPlayerId, "You"), Car.VehicleType.BALANCED);
+                    ensurePlayerExists(localPlayerId, msg.getPayload().getOrDefault("name", "You"));
+                } else if ("PLAYER_JOINED".equals(msg.getType())) {
+                    String playerId = msg.getPayload().get("playerId");
+                    String name = msg.getPayload().getOrDefault("name", "Player");
+                    boolean ready = Boolean.parseBoolean(msg.getPayload().getOrDefault("ready", "false"));
+                    ensurePlayerExists(playerId, name);
+                    com.lanracing.Utility.Player player = game.getGameState().getPlayersById().get(playerId);
+                    if (player != null) {
+                        player.setReady(ready);
+                    }
+                } else if ("PLAYER_LEFT".equals(msg.getType())) {
+                    String playerId = msg.getPayload().get("playerId");
+                    if (playerId != null) {
+                        game.removePlayer(playerId);
+                    }
+                } else if ("PLAYER_READY_STATE".equals(msg.getType())) {
+                    String playerId = msg.getPayload().get("playerId");
+                    boolean ready = Boolean.parseBoolean(msg.getPayload().getOrDefault("ready", "false"));
+                    com.lanracing.Utility.Player player = game.getGameState().getPlayersById().get(playerId);
+                    if (player != null) {
+                        player.setReady(ready);
+                    }
                 } else if ("RACE_STARTED".equals(msg.getType())) {
                     game.startRace();
                 }
@@ -115,20 +156,22 @@ public class GameClient {
                 udpSocket.receive(packet);
                 String payload = new String(packet.getData(), packet.getOffset(), packet.getLength(), StandardCharsets.UTF_8);
                 String[] parts = payload.split("\\|");
-                if (parts.length >= 6 && "STATE".equals(parts[0])) {
+                if (parts.length >= 8 && "STATE".equals(parts[0])) {
                     String playerId = parts[1];
                     double x = Double.parseDouble(parts[2]);
                     double y = Double.parseDouble(parts[3]);
                     double angle = Double.parseDouble(parts[4]);
                     int seq = Integer.parseInt(parts[5]);
+                    double vx = Double.parseDouble(parts[6]);
+                    double vy = Double.parseDouble(parts[7]);
 
                     Car car = game.getGameState().getCarsByPlayerId().get(playerId);
                     if (car != null) {
                         if (playerId.equals(localPlayerId)) {
-                            reconcile(car, x, y, angle, seq);
+                            reconcile(car, x, y, angle, seq, vx, vy);
                         } else {
-                            car.setPosition(new Vector2D((car.getPosition().x + x) / 2.0, (car.getPosition().y + y) / 2.0));
-                            car.setDirectionDeg((car.getDirectionDeg() + angle) / 2.0);
+                            remoteTargets.put(playerId, new RemoteState(x, y, angle, vx, vy));
+                            interpolateRemote(car, remoteTargets.get(playerId));
                         }
                     }
                 }
@@ -138,18 +181,52 @@ public class GameClient {
         }
     }
 
-    private void reconcile(Car car, double x, double y, double angle, int seq) {
+    private void reconcile(Car car, double x, double y, double angle, int seq, double vx, double vy) {
         car.setPosition(new Vector2D(x, y));
+        car.setVelocity(new Vector2D(vx, vy));
         car.setDirectionDeg(angle);
 
         while (!predictionBuffer.isEmpty() && predictionBuffer.peekFirst().sequence <= seq) {
             predictionBuffer.removeFirst();
         }
 
-        for (PredictedState predicted : predictionBuffer) {
-            car.setPosition(predicted.position);
-            car.setDirectionDeg(predicted.angle);
+        for (PendingInput pending : predictionBuffer) {
+            car.applyInput(pending.inputState, 1.0 / Constants.CLIENT_UDP_SEND_RATE);
         }
+    }
+
+    private void interpolateRemote(Car car, RemoteState target) {
+        double factor = 0.35;
+        Vector2D current = car.getPosition();
+        car.setPosition(new Vector2D(
+                current.x + (target.x - current.x) * factor,
+                current.y + (target.y - current.y) * factor
+        ));
+        car.setVelocity(new Vector2D(target.vx, target.vy));
+        car.setDirectionDeg(interpolateAngle(car.getDirectionDeg(), target.angle, factor));
+    }
+
+    private double interpolateAngle(double current, double target, double factor) {
+        double delta = ((target - current + 540) % 360) - 180;
+        return current + (delta * factor);
+    }
+
+    private InputState copyInput(InputState input) {
+        InputState copy = new InputState();
+        copy.accelerate = input.accelerate;
+        copy.brake = input.brake;
+        copy.turnLeft = input.turnLeft;
+        copy.turnRight = input.turnRight;
+        copy.nitro = input.nitro;
+        copy.reset = input.reset;
+        return copy;
+    }
+
+    private void ensurePlayerExists(String playerId, String name) {
+        if (playerId == null || game.getGameState().getPlayersById().containsKey(playerId)) {
+            return;
+        }
+        game.addPlayer(new com.lanracing.Utility.Player(playerId, name), Car.VehicleType.BALANCED);
     }
 
     public void disconnect() {
@@ -168,15 +245,29 @@ public class GameClient {
         return localPlayerId;
     }
 
-    private static class PredictedState {
+    private static class PendingInput {
         private final int sequence;
-        private final Vector2D position;
-        private final double angle;
+        private final InputState inputState;
 
-        private PredictedState(int sequence, Vector2D position, double angle) {
+        private PendingInput(int sequence, InputState inputState) {
             this.sequence = sequence;
-            this.position = new Vector2D(position.x, position.y);
+            this.inputState = inputState;
+        }
+    }
+
+    private static class RemoteState {
+        private final double x;
+        private final double y;
+        private final double angle;
+        private final double vx;
+        private final double vy;
+
+        private RemoteState(double x, double y, double angle, double vx, double vy) {
+            this.x = x;
+            this.y = y;
             this.angle = angle;
+            this.vx = vx;
+            this.vy = vy;
         }
     }
 }

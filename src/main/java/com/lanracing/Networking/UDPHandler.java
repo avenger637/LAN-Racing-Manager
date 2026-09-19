@@ -2,12 +2,15 @@ package com.lanracing.Networking;
 
 import com.lanracing.Game.Car;
 import com.lanracing.Game.Game;
+import com.lanracing.Utility.Constants;
+import com.lanracing.Utility.InputState;
 import com.lanracing.Utility.Vector2D;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -25,7 +28,13 @@ public class UDPHandler implements Runnable {
 
     @Override
     public void run() {
+        long lastBroadcastAt = System.currentTimeMillis();
+        int tickIntervalMs = 1000 / Constants.SERVER_TICK_RATE;
         byte[] buf = new byte[512];
+        try {
+            socket.setSoTimeout(20);
+        } catch (Exception ignored) {
+        }
         while (running) {
             try {
                 DatagramPacket packet = new DatagramPacket(buf, buf.length);
@@ -33,38 +42,76 @@ public class UDPHandler implements Runnable {
                 subscribers.add(new ClientAddress(packet.getAddress(), packet.getPort()));
 
                 String payload = new String(packet.getData(), packet.getOffset(), packet.getLength(), StandardCharsets.UTF_8);
-                handleMovementPacket(payload);
+                handleInputPacket(payload);
+            } catch (SocketTimeoutException ignored) {
             } catch (IOException ignored) {
                 running = false;
+            }
+
+            long now = System.currentTimeMillis();
+            if (now - lastBroadcastAt >= tickIntervalMs) {
+                broadcastAuthoritativeState();
+                lastBroadcastAt = now;
             }
         }
     }
 
-    private void handleMovementPacket(String payload) throws IOException {
-        String[] parts = payload.split("\\|");
-        if (parts.length < 6 || !"MOVE".equals(parts[0])) {
+    private void handleInputPacket(String payload) {
+        try {
+            String[] parts = payload.split("\\|");
+            if (parts.length < 9 || !"INPUT".equals(parts[0])) {
+                return;
+            }
+
+            String playerId = parts[1];
+            boolean accelerate = Boolean.parseBoolean(parts[2]);
+            boolean brake = Boolean.parseBoolean(parts[3]);
+            boolean turnLeft = Boolean.parseBoolean(parts[4]);
+            boolean turnRight = Boolean.parseBoolean(parts[5]);
+            boolean nitro = Boolean.parseBoolean(parts[6]);
+            boolean reset = Boolean.parseBoolean(parts[7]);
+            int sequence = Integer.parseInt(parts[8]);
+
+            InputState inputState = game.getInputState(playerId);
+            Car car = game.getGameState().getCarsByPlayerId().get(playerId);
+            if (inputState != null && car != null && sequence >= car.getLastInputSequence()) {
+                inputState.accelerate = accelerate;
+                inputState.brake = brake;
+                inputState.turnLeft = turnLeft;
+                inputState.turnRight = turnRight;
+                inputState.nitro = nitro;
+                inputState.reset = reset;
+                car.setLastInputSequence(sequence);
+            }
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void broadcastAuthoritativeState() {
+        if (subscribers.isEmpty()) {
             return;
         }
 
-        String playerId = parts[1];
-        double x = Double.parseDouble(parts[2]);
-        double y = Double.parseDouble(parts[3]);
-        double angle = Double.parseDouble(parts[4]);
-        int sequence = Integer.parseInt(parts[5]);
+        for (Car car : game.getGameState().getCarsByPlayerId().values()) {
+            Vector2D position = car.getPosition();
+            Vector2D velocity = car.getVelocity();
+            String update = "STATE|"
+                    + car.getPlayerId() + "|"
+                    + position.x + "|"
+                    + position.y + "|"
+                    + car.getDirectionDeg() + "|"
+                    + car.getLastInputSequence() + "|"
+                    + velocity.x + "|"
+                    + velocity.y;
+            byte[] response = update.getBytes(StandardCharsets.UTF_8);
 
-        Car car = game.getGameState().getCarsByPlayerId().get(playerId);
-        if (car != null && sequence >= car.getLastInputSequence()) {
-            car.setPosition(new Vector2D(x, y));
-            car.setDirectionDeg(angle);
-            car.setLastInputSequence(sequence);
-        }
-
-        String update = "STATE|" + playerId + "|" + x + "|" + y + "|" + angle + "|" + sequence;
-        byte[] response = update.getBytes(StandardCharsets.UTF_8);
-
-        for (ClientAddress address : subscribers) {
-            DatagramPacket outPacket = new DatagramPacket(response, response.length, address.address, address.port);
-            socket.send(outPacket);
+            for (ClientAddress address : subscribers) {
+                try {
+                    DatagramPacket outPacket = new DatagramPacket(response, response.length, address.address, address.port);
+                    socket.send(outPacket);
+                } catch (IOException ignored) {
+                }
+            }
         }
     }
 

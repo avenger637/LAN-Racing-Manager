@@ -10,7 +10,7 @@ LAN Racing Manager is a Java (JDK 11+) Swing-based real-time 2D multiplayer raci
 - Vehicle types: Speedster, Muscle, Balanced
 - Power-ups: nitro, shield, repair, teleport
 - DSA package: graph (BFS/DFS/Dijkstra), queue, stack, priority queue, hash table
-- Networking package: TCP lobby/race control + UDP movement state exchange with sequence-based reconciliation hooks
+- Networking package: TCP lobby/race control + ready-gated race start + UDP input streaming with server-authoritative state snapshots
 - Swing GUI: Main menu, lobby, game panel, HUD, results table
 
 ## Build and test

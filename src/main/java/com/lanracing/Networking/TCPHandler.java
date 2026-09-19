@@ -34,8 +34,9 @@ public class TCPHandler implements Runnable {
             String joinName = "Player-" + playerId.substring(0, 4);
             game.addPlayer(new Player(playerId, joinName), Car.VehicleType.BALANCED);
 
-            out.println("WELCOME|playerId=" + playerId);
-            broadcast("PLAYER_JOINED|playerId=" + playerId + "|name=" + joinName);
+            out.println("WELCOME|playerId=" + playerId + "|name=" + joinName);
+            sendLobbySnapshot(out);
+            broadcast("PLAYER_JOINED|playerId=" + playerId + "|name=" + joinName + "|ready=false");
 
             String line;
             while ((line = in.readLine()) != null) {
@@ -46,8 +47,7 @@ public class TCPHandler implements Runnable {
         } finally {
             if (playerId != null) {
                 clientOutputs.remove(playerId);
-                game.getGameState().getPlayersById().remove(playerId);
-                game.getGameState().getCarsByPlayerId().remove(playerId);
+                game.removePlayer(playerId);
                 broadcast("PLAYER_LEFT|playerId=" + playerId);
             }
         }
@@ -58,19 +58,29 @@ public class TCPHandler implements Runnable {
             case "READY":
                 Player player = game.getGameState().getPlayersById().get(playerId);
                 if (player != null) {
-                    player.setReady(true);
-                    broadcast("PLAYER_READY|playerId=" + playerId);
+                    boolean ready = !"false".equalsIgnoreCase(msg.getPayload().getOrDefault("value", "true"));
+                    player.setReady(ready);
+                    broadcast("PLAYER_READY_STATE|playerId=" + playerId + "|ready=" + ready);
                 }
                 break;
             case "START_RACE":
-                game.startRace();
-                broadcast("RACE_STARTED|time=" + game.getRaceStartMillis());
+                if (game.startRaceIfReady()) {
+                    broadcast("RACE_STARTED|time=" + game.getRaceStartMillis());
+                } else {
+                    out.println("START_DENIED|reason=NOT_READY_OR_MIN_PLAYERS");
+                }
                 break;
             case "PING":
                 out.println("PONG");
                 break;
             default:
                 break;
+        }
+    }
+
+    private void sendLobbySnapshot(PrintWriter out) {
+        for (Player p : game.getGameState().getPlayersById().values()) {
+            out.println("PLAYER_JOINED|playerId=" + p.getId() + "|name=" + p.getName() + "|ready=" + p.isReady());
         }
     }
 

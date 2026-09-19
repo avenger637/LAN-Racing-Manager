@@ -1,6 +1,7 @@
 package com.lanracing.GUI;
 
 import com.lanracing.Game.Game;
+import com.lanracing.Networking.GameClient;
 import com.lanracing.Utility.Player;
 
 import javax.swing.DefaultListModel;
@@ -12,31 +13,50 @@ import java.awt.BorderLayout;
 
 public class LobbyScreen extends JPanel {
     private final Game game;
-    private final String localPlayerId;
+    private final GameClient client;
+    private final String offlinePlayerId;
+    private final boolean hostControls;
     private final Runnable onStart;
+    private boolean transitioned;
+    private JButton startButton;
+    private JButton readyButton;
 
     private final DefaultListModel<String> listModel = new DefaultListModel<>();
 
-    public LobbyScreen(Game game, String localPlayerId, Runnable onStart) {
+    public LobbyScreen(Game game, GameClient client, String offlinePlayerId, boolean hostControls, Runnable onStart) {
         this.game = game;
-        this.localPlayerId = localPlayerId;
+        this.client = client;
+        this.offlinePlayerId = offlinePlayerId;
+        this.hostControls = hostControls;
         this.onStart = onStart;
 
         setLayout(new BorderLayout(10, 10));
         JList<String> playerList = new JList<>(listModel);
 
-        JButton readyButton = new JButton("Ready");
+        readyButton = new JButton("Ready");
         readyButton.addActionListener(e -> {
+            String localPlayerId = resolveLocalPlayerId();
+            if (localPlayerId == null) {
+                return;
+            }
             Player p = game.getGameState().getPlayersById().get(localPlayerId);
             if (p != null) {
                 p.setReady(true);
+                if (client != null) {
+                    client.sendReady(true);
+                }
             }
         });
 
-        JButton startButton = new JButton("Start Race");
+        startButton = new JButton("Start Race");
         startButton.addActionListener(e -> {
+            if (client != null) {
+                client.sendStartRace();
+                return;
+            }
+
             game.startRace();
-            onStart.run();
+            transitionToRace();
         });
 
         add(playerList, BorderLayout.CENTER);
@@ -54,5 +74,26 @@ public class LobbyScreen extends JPanel {
         for (Player player : game.getGameState().getPlayersById().values()) {
             listModel.addElement(player.getName() + (player.isReady() ? " [READY]" : " [NOT READY]"));
         }
+        startButton.setEnabled(hostControls && (client == null || game.canStartRace()));
+        readyButton.setEnabled(resolveLocalPlayerId() != null);
+
+        if (game.getGameState().isRaceStarted()) {
+            transitionToRace();
+        }
+    }
+
+    private String resolveLocalPlayerId() {
+        if (client != null) {
+            return client.getLocalPlayerId();
+        }
+        return offlinePlayerId;
+    }
+
+    private void transitionToRace() {
+        if (transitioned) {
+            return;
+        }
+        transitioned = true;
+        onStart.run();
     }
 }

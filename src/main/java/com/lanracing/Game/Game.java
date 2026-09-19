@@ -35,6 +35,12 @@ public class Game {
         raceManager.registerPlayer(player.getId());
     }
 
+    public void removePlayer(String playerId) {
+        gameState.getPlayersById().remove(playerId);
+        gameState.getCarsByPlayerId().remove(playerId);
+        inputStates.remove(playerId);
+    }
+
     public void update(double dtSeconds) {
         if (!gameState.isRaceStarted()) {
             return;
@@ -71,6 +77,27 @@ public class Game {
     public void startRace() {
         gameState.setRaceStarted(true);
         raceStartMillis = System.currentTimeMillis();
+    }
+
+    public boolean canStartRace() {
+        int playerCount = gameState.getPlayersById().size();
+        if (playerCount < Constants.MIN_PLAYERS || playerCount > Constants.MAX_PLAYERS) {
+            return false;
+        }
+        for (Player player : gameState.getPlayersById().values()) {
+            if (!player.isReady()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public boolean startRaceIfReady() {
+        if (!canStartRace()) {
+            return false;
+        }
+        startRace();
+        return true;
     }
 
     public void stopRace() {
